@@ -6,7 +6,6 @@ export class GoogleCalendarService {
     this.baseUrl = 'https://www.googleapis.com/calendar/v3'
   }
 
-
   async getBarberEvents(barberId, date) {
     try {
       const barber = GOOGLE_CALENDAR_CONFIG.BARBERS[barberId]
@@ -16,8 +15,26 @@ export class GoogleCalendarService {
       const url = `${this.baseUrl}/calendars/${encodeURIComponent(barber.calendarId)}/events?timeMin=${startDate.toISOString()}&timeMax=${endDate.toISOString()}&singleEvents=true&orderBy=startTime&key=${this.apiKey}`
       const res = await fetch(url)
       if (!res.ok) return []
-      const data = await res.json();
-      return data.items || []
+      const data = await res.json()
+      const items = data.items || []
+
+      // When multiple barbers share the same calendar, filter by barberId stored
+      // in extendedProperties to avoid showing another barber's bookings
+      const sameCalendarCount = Object.values(GOOGLE_CALENDAR_CONFIG.BARBERS)
+        .filter(b => b.calendarId === barber.calendarId).length
+
+      if (sameCalendarCount > 1) {
+        return items.filter(ev => {
+          const evBarberId = ev?.extendedProperties?.private?.barberId
+          if (evBarberId) return evBarberId === String(barberId)
+          if (ev.attendees && Array.isArray(ev.attendees)) {
+            return ev.attendees.some(a => a.email === barber.email)
+          }
+          return false
+        })
+      }
+
+      return items
     } catch { return [] }
   }
 
@@ -34,18 +51,16 @@ export class GoogleCalendarService {
   }
 
   async getAvailableSlots(barberId, date) {
-    const daySlots = DateUtils.generateTimeSlots(new Date(date), barberId)
-    const available = []
     const barber = GOOGLE_CALENDAR_CONFIG.BARBERS[barberId]
     if (!barber) return []
 
-    // Apply quotas
     const override = ADMIN_SETTINGS.quotasOverride?.[barberId]
     const quotas = { ...barber.quotas, ...override }
     const events = await this.getBarberEvents(barberId, date)
-    const dayCount = events.length
-    if (quotas?.maxPerDay && dayCount >= quotas.maxPerDay) return []
+    if (quotas?.maxPerDay && events.length >= quotas.maxPerDay) return []
 
+    const daySlots = DateUtils.generateTimeSlots(new Date(date), barberId)
+    const available = []
     for (const slot of daySlots) {
       const ok = await this.checkAvailability(barberId, date, slot)
       if (ok) available.push(slot)
@@ -53,44 +68,9 @@ export class GoogleCalendarService {
     return available
   }
 
-  async getBarberEvents(barberId, date) {
-    try {
-      const barber = GOOGLE_CALENDAR_CONFIG.BARBERS[barberId]
-      if (!barber) return []
-      const startDate = new Date(date); startDate.setHours(0, 0, 0, 0)
-      const endDate = new Date(date); endDate.setHours(23, 59, 59, 999)
-      const url = `${this.baseUrl}/calendars/${encodeURIComponent(barber.calendarId)}/events?timeMin=${startDate.toISOString()}&timeMax=${endDate.toISOString()}&singleEvents=true&orderBy=startTime&key=${this.apiKey}`
-      const res = await fetch(url)
-      if (!res.ok) return []
-      const data = await res.json();
-      const items = data.items || []
-
-
-      const sameCalendarCount = Object.values(GOOGLE_CALENDAR_CONFIG.BARBERS)
-        .filter(b => b.calendarId === barber.calendarId).length
-
-      if (sameCalendarCount > 1) {
-
-        return items.filter(ev => {
-          const evBarberId = ev?.extendedProperties?.private?.barberId
-          if (evBarberId) return evBarberId === String(barberId)
-
-          if (ev.attendees && Array.isArray(ev.attendees)) {
-            return ev.attendees.some(a => a.email === barber.email)
-          }
-
-          return false
-        })
-      }
-
-      return items
-    } catch { return [] }
-  }
-
   async countWeekEvents(barberId, date) {
     const d = new Date(date)
-    const day = d.getDay()
-    const diffToMonday = (day + 6) % 7
+    const diffToMonday = (d.getDay() + 6) % 7
     const monday = new Date(d); monday.setDate(d.getDate() - diffToMonday); monday.setHours(0, 0, 0, 0)
     const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6); sunday.setHours(23, 59, 59, 999)
     const all = []
@@ -111,41 +91,21 @@ export class GoogleCalendarService {
     return count < quotas.maxPerWeek
   }
 
-  async createBooking({ name, phone, service, date, time, barber }) {
+  async createBooking({ name, phone, service, date, time, barber, barberName, barberEmail }) {
     try {
-      const barberObj = GOOGLE_CALENDAR_CONFIG.BARBERS[barber] || {};
-      const barberName = barberObj.name || '';
-      const barberEmail = barberObj.email || '';
-
-      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:3001"
-
-      console.log('🔧 API URL carregada:', apiUrl)
-      console.log('🔧 Todas env vars:', import.meta.env)
-
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
       const res = await fetch(`${apiUrl}/agendar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          phone,
-          service,
-          date,
-          time,
-          barber,
-          barberName,
-          barberEmail
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        return { success: false, error: data.error || `HTTP ${res.status}` };
-      }
-      return { success: true, event: data.event || data };
+        body: JSON.stringify({ name, phone, service, date, time, barber, barberName, barberEmail })
+      })
+      const data = await res.json()
+      if (!res.ok) return { success: false, error: data.error || `HTTP ${res.status}`, status: res.status }
+      return { success: true, event: data.event || data }
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: err.message }
     }
   }
 }
-
 
 export const googleCalendarService = new GoogleCalendarService()

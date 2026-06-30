@@ -1,7 +1,7 @@
-// ...existing code...
 import { useEffect, useMemo, useState, useRef } from "react";
 import { GOOGLE_CALENDAR_CONFIG, DateUtils } from "../config/calendarConfig";
 import { googleCalendarService } from "../services/googleCalendarService";
+import { useAvailableSlots } from "../hooks/useAvailableSlots";
 
 import { SERVICES } from "../config/servicePrices";
 
@@ -13,11 +13,11 @@ export default function Schedule() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [showCustomer, setShowCustomer] = useState(false);
-  const [slots, setSlots] = useState([]);
-  const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedDay, setSelectedDay] = useState("");
   const calendarRef = useRef(null);
-  const formRef = useRef(null); // Ref para o formulário
+  const formRef = useRef(null);
+
+  const { slots, loading: loadingSlots, setSlots } = useAvailableSlots(date, barber);
 
   useEffect(() => {
     setShowCustomer(Boolean(date && time));
@@ -31,69 +31,9 @@ export default function Schedule() {
     return d.toLocaleDateString("pt-PT", { month: "long", year: "numeric" });
   }, [calendarYear, calendarMonth]);
 
-  async function refreshSlots(selectedDate, selectedBarber) {
-    if (!selectedDate) {
-      setSlots([]);
-      return;
-    }
-    const d = new Date(selectedDate);
-    if (d.getDay() === 0) {
-      setSlots([]);
-      return;
-    }
-    setLoadingSlots(true);
-    try {
-      if (
-        selectedBarber &&
-        selectedBarber !== "any" &&
-        GOOGLE_CALENDAR_CONFIG.API_KEY !== "SUA_API_KEY_AQUI"
-      ) {
-        const available = await googleCalendarService.getAvailableSlots(
-          selectedBarber,
-          selectedDate
-        );
-        setSlots(available);
-      } else if (selectedBarber && selectedBarber !== "any") {
-        setSlots(DateUtils.generateTimeSlots(d, selectedBarber));
-      } else {
-        // sem preferência: usar faixa padrão (09-18 ou sáb 08-18)
-        const base = d.getDay() === 6 ? ["08:00", "18:00"] : ["09:00", "18:00"];
-        const [start, end] = base;
-        const tmpCfg = {
-          BARBERS: {
-            any: {
-              workingHours: { [DateUtils.getDayName(d)]: { start, end } },
-            },
-          },
-          TIME_SLOTS: { interval: 30 },
-        };
-        const slotsTmp = [];
-        let cur = new Date(`2000-01-01T${start}`);
-        const endD = new Date(`2000-01-01T${end}`);
-        while (cur < endD) {
-          slotsTmp.push(cur.toTimeString().slice(0, 5));
-          cur.setMinutes(cur.getMinutes() + 30);
-        }
-        setSlots(slotsTmp);
-      }
-    } finally {
-      setLoadingSlots(false);
-    }
-  }
-
-  useEffect(() => {
-    refreshSlots(date, barber);
-  }, [date, barber]);
-
   // UNIFIED handleSubmit: valida, chama backend, trata conflito e limpa formulário
   async function handleSubmit(e) {
     e.preventDefault();
-
-    // opcional: mensagem quando API key placeholder (manter se quiser)
-    if (GOOGLE_CALENDAR_CONFIG.API_KEY === "SUA_API_KEY_AQUI") {
-      // se você usa backend com conta de serviço, API key aqui não é crítica para criar eventos
-      // comente ou remova essa checagem se estiver usando backend
-    }
 
     if (!date || !time || !service || barber === "any") {
       alert("Preencha serviço, profissional, data e horário.");

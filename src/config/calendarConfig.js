@@ -1,6 +1,6 @@
 export const GOOGLE_CALENDAR_CONFIG = {
   CALENDAR_ID: 'barbeariacruz@gmail.com',
-  API_KEY: import.meta.env.VITE_GOOGLE_API_KEY || 'AIzaSyCY_rp4gQyGeYFYSaNY4pKro09apsCKCxU',
+  API_KEY: import.meta.env.VITE_GOOGLE_API_KEY || '',
   BARBERS: {
     '1': {
       name: 'Rogério',
